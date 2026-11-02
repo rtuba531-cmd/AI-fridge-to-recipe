@@ -63,13 +63,19 @@ The app opens at http://localhost:8501.
 
 ## Configuration
 
-The model is set at the top of `app.py`:
+The default model is set at the top of `app.py`:
 
 ```python
-MODEL_NAME = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 ```
 
-Change it to any other Gemini Flash model you have access to.
+To use a different Gemini Flash model without editing code, set `GEMINI_MODEL` in your environment or in Streamlit Secrets:
+
+```toml
+GEMINI_MODEL = "gemini-3.8-flash"
+```
+
+Google retires older models over time. If you see a 404 "model is no longer available" error, set this to the model name the error message recommends.
 
 ## Project structure
 
@@ -95,3 +101,4 @@ Never commit your API key. If you use `.streamlit/secrets.toml`, add it to `.git
 - Upload a fridge photo and detect ingredients with Gemini's vision support
 - Favorites and a shopping list for missing ingredients
 - A "use up soon" field to prioritise ingredients that spoil quickly
+- 
