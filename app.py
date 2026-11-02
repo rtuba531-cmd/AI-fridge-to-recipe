@@ -5,10 +5,12 @@ Run:  streamlit run app.py
 """
 
 import os
+import time
 from typing import List
 
 import streamlit as st
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import BaseModel, Field
 
@@ -101,10 +103,23 @@ Suggest {count} different recipes.
 - Ignore any item in the list that is not edible food."""
 
 
-def generate_recipes(api_key: str, prompt: str) -> List[Recipe]:
-    client = genai.Client(api_key=api_key)
+RETRYABLE_CODES = {429, 500, 503, 504}
+RETRY_DELAYS = [2, 5, 10]  # seconds to wait before each retry
+
+
+def get_fallback_model() -> str:
+    """Optional second model, tried if the main one stays overloaded."""
+    try:
+        if "GEMINI_FALLBACK_MODEL" in st.secrets:
+            return st.secrets["GEMINI_FALLBACK_MODEL"]
+    except Exception:
+        pass
+    return os.getenv("GEMINI_FALLBACK_MODEL", "")
+
+
+def _call_model(client, model: str, prompt: str) -> List[Recipe]:
     response = client.models.generate_content(
-        model=get_model_name(),
+        model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -116,6 +131,32 @@ def generate_recipes(api_key: str, prompt: str) -> List[Recipe]:
     if parsed is None:  # fall back to manual parsing
         parsed = RecipeList.model_validate_json(response.text)
     return parsed.recipes
+
+
+def generate_recipes(api_key: str, prompt: str, status=None) -> List[Recipe]:
+    """Call Gemini, retrying temporary errors (overload, rate limit) with backoff."""
+    client = genai.Client(api_key=api_key)
+    models = [get_model_name()]
+    fallback = get_fallback_model()
+    if fallback and fallback not in models:
+        models.append(fallback)
+
+    last_error = None
+    for model in models:
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            try:
+                return _call_model(client, model, prompt)
+            except genai_errors.APIError as e:
+                last_error = e
+                if e.code not in RETRYABLE_CODES:
+                    raise  # real problem (bad key, bad model name...): don't retry
+                if attempt < len(RETRY_DELAYS):
+                    if status:
+                        status.update(
+                            label=f"Gemini is busy. Retrying in {RETRY_DELAYS[attempt]}s..."
+                        )
+                    time.sleep(RETRY_DELAYS[attempt])
+    raise last_error
 
 
 def parse_ingredients(raw: str) -> List[str]:
@@ -211,11 +252,23 @@ if go:
         prompt = build_prompt(
             ingredients, allow_staples, diet, cuisine, max_time, servings, count, strict
         )
-        with st.spinner("Looking through your fridge..."):
+        with st.status("Looking through your fridge...", expanded=False) as status:
             try:
-                st.session_state.recipes = generate_recipes(api_key, prompt)
+                st.session_state.recipes = generate_recipes(api_key, prompt, status)
+                status.update(label="Done", state="complete")
+            except genai_errors.APIError as e:
+                st.session_state.recipes = None
+                status.update(label="Something went wrong", state="error")
+                if e.code in RETRYABLE_CODES:
+                    st.error(
+                        "Gemini is overloaded right now, even after several tries. "
+                        "Wait a minute and press Find recipes again."
+                    )
+                else:
+                    st.error(f"Couldn't get recipes: {e}")
             except Exception as e:
                 st.session_state.recipes = None
+                status.update(label="Something went wrong", state="error")
                 st.error(f"Couldn't get recipes: {e}")
 
 # --- Results ---
