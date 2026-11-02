@@ -168,15 +168,24 @@ st.text_area(
     placeholder="eggs, spinach, leftover rice, tomatoes, cheddar...",
 )
 
+def add_ingredient(item: str) -> None:
+    """Button callback: runs before the rerun, so it can safely edit the widget's state."""
+    current = parse_ingredients(st.session_state.ingredients_text)
+    if item not in current:
+        current.append(item)
+    st.session_state.ingredients_text = ", ".join(current)
+
+
 st.write("Quick add:")
 cols = st.columns(len(QUICK_ADD))
 for col, item in zip(cols, QUICK_ADD):
-    if col.button(item, key=f"qa_{item}", use_container_width=True):
-        current = parse_ingredients(st.session_state.ingredients_text)
-        if item not in current:
-            current.append(item)
-        st.session_state.ingredients_text = ", ".join(current)
-        st.rerun()
+    col.button(
+        item,
+        key=f"qa_{item}",
+        use_container_width=True,
+        on_click=add_ingredient,
+        args=(item,),
+    )
 
 ingredients = parse_ingredients(st.session_state.ingredients_text)
 if ingredients:
