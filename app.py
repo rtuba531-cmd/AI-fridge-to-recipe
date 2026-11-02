@@ -12,7 +12,17 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-MODEL_NAME = "gemini-2.5-flash"  # swap for any newer Flash model you have access to
+DEFAULT_MODEL = "gemini-3.8-flash"
+
+
+def get_model_name() -> str:
+    """Override with GEMINI_MODEL in Streamlit secrets or the environment."""
+    try:
+        if "GEMINI_MODEL" in st.secrets:
+            return st.secrets["GEMINI_MODEL"]
+    except Exception:
+        pass  # no secrets.toml file
+    return os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
 
 # ----------------------------------------------------------------------------
 # Structured output schema
@@ -94,7 +104,7 @@ Suggest {count} different recipes.
 def generate_recipes(api_key: str, prompt: str) -> List[Recipe]:
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(
-        model=MODEL_NAME,
+        model=get_model_name(),
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
