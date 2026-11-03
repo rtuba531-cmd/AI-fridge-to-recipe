@@ -75,6 +75,12 @@ To use a different Gemini Flash model without editing code, set `GEMINI_MODEL` i
 GEMINI_MODEL = "gemini-3.8-flash"
 ```
 
+Temporary errors (503 overloaded, 429 rate limit) are retried automatically up to 3 times, waiting 2, 5 and 10 seconds. If the main model stays busy, the app then tries backup models in order (default: `gemini-3.5-flash`, then `gemini-3.5-flash-lite`). To choose your own backups, set a comma-separated list:
+
+```toml
+GEMINI_FALLBACK_MODEL = "gemini-3.5-flash, gemini-3.5-flash-lite"
+```
+
 Google retires older models over time. If you see a 404 "model is no longer available" error, set this to the model name the error message recommends.
 
 ## Project structure
@@ -101,4 +107,3 @@ Never commit your API key. If you use `.streamlit/secrets.toml`, add it to `.git
 - Upload a fridge photo and detect ingredients with Gemini's vision support
 - Favorites and a shopping list for missing ingredients
 - A "use up soon" field to prioritise ingredients that spoil quickly
-- 
