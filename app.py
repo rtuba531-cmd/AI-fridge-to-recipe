@@ -107,14 +107,21 @@ RETRYABLE_CODES = {429, 500, 503, 504}
 RETRY_DELAYS = [2, 5, 10]  # seconds to wait before each retry
 
 
-def get_fallback_model() -> str:
-    """Optional second model, tried if the main one stays overloaded."""
+DEFAULT_FALLBACKS = ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
+
+
+def get_fallback_models() -> List[str]:
+    """Backup models, tried in order if the main one stays overloaded.
+    Override with GEMINI_FALLBACK_MODEL (comma-separated) in secrets or the environment."""
+    value = ""
     try:
         if "GEMINI_FALLBACK_MODEL" in st.secrets:
-            return st.secrets["GEMINI_FALLBACK_MODEL"]
+            value = st.secrets["GEMINI_FALLBACK_MODEL"]
     except Exception:
         pass
-    return os.getenv("GEMINI_FALLBACK_MODEL", "")
+    value = value or os.getenv("GEMINI_FALLBACK_MODEL", "")
+    custom = [m.strip() for m in value.split(",") if m.strip()]
+    return custom or DEFAULT_FALLBACKS
 
 
 def _call_model(client, model: str, prompt: str) -> List[Recipe]:
@@ -136,26 +143,30 @@ def _call_model(client, model: str, prompt: str) -> List[Recipe]:
 def generate_recipes(api_key: str, prompt: str, status=None) -> List[Recipe]:
     """Call Gemini, retrying temporary errors (overload, rate limit) with backoff."""
     client = genai.Client(api_key=api_key)
-    models = [get_model_name()]
-    fallback = get_fallback_model()
-    if fallback and fallback not in models:
-        models.append(fallback)
+    main = get_model_name()
+    models = [main] + [m for m in get_fallback_models() if m != main]
 
     last_error = None
-    for model in models:
-        for attempt in range(len(RETRY_DELAYS) + 1):
+    for index, model in enumerate(models):
+        # Full retries on the main model, one quick retry on each backup
+        delays = RETRY_DELAYS if index == 0 else RETRY_DELAYS[:1]
+        for attempt in range(len(delays) + 1):
             try:
                 return _call_model(client, model, prompt)
             except genai_errors.APIError as e:
                 last_error = e
+                if e.code == 404 and index > 0:
+                    break  # backup model name not available to this key: try the next one
                 if e.code not in RETRYABLE_CODES:
-                    raise  # real problem (bad key, bad model name...): don't retry
-                if attempt < len(RETRY_DELAYS):
+                    raise  # real problem (bad key, bad main model name...): don't retry
+                if attempt < len(delays):
                     if status:
                         status.update(
-                            label=f"Gemini is busy. Retrying in {RETRY_DELAYS[attempt]}s..."
+                            label=f"{model} is busy. Retrying in {delays[attempt]}s..."
                         )
-                    time.sleep(RETRY_DELAYS[attempt])
+                    time.sleep(delays[attempt])
+                elif status and index + 1 < len(models):
+                    status.update(label=f"Switching to {models[index + 1]}...")
     raise last_error
 
 
